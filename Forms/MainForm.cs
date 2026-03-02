@@ -50,6 +50,9 @@ namespace StockDatasCollection.Forms
             // Set default archive directory
             txtArchiveDir.Text = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Archives");
             RefreshChartHtml();
+            // 存档时段限制与“仅开盘时段采集”开关联动
+            _archiver.EnforceTradingHours = chkTimeRestrict.Checked;
+            chkTimeRestrict.CheckedChanged += (s, ev) => { _archiver.EnforceTradingHours = chkTimeRestrict.Checked; };
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -198,8 +201,8 @@ namespace StockDatasCollection.Forms
                 var codes = _codeManager.GetAll();
                 if (codes.Count == 0) return;
 
-                // 仅在实际开盘时段（含缓冲）内才发起采集，其余时间定时器照常运行但不采集
-                if (!IsInTradingHours()) return;
+                // 若勾选“仅开盘时段采集”，则非开盘时段不采集，方便测试时可关闭此限制
+                if (chkTimeRestrict.Checked && !IsInTradingHours()) return;
 
                 var points = await _collector.FetchAsync(codes);
                 _cache.AddRangeDedupeByMinute(points);
@@ -254,9 +257,9 @@ namespace StockDatasCollection.Forms
 
         private void btnArchiveNow_Click(object sender, EventArgs e)
         {
-            if (!IsInTradingHours())
+            if (chkTimeRestrict.Checked && !IsInTradingHours())
             {
-                MessageBox.Show("当前不在开盘时段，存档仅在有效时段内生效。\n有效时段：9:13-11:32、12:58-15:02。",
+                MessageBox.Show("当前不在开盘时段，存档仅在有效时段内生效。\n有效时段：9:13-11:32、12:58-15:02。\n（取消勾选「仅开盘时段采集」可随时存档测试）",
                     "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }

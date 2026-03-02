@@ -27,6 +27,9 @@ namespace StockDatasCollection.Services
         public DateTime? LastArchiveTime { get; private set; }
         public DateTime? NextArchiveTime { get; private set; }
 
+        /// <summary>为 true 时仅在开盘时段存档；为 false 时任意时间可存档（与“仅开盘时段采集”开关联动，便于测试）。</summary>
+        public bool EnforceTradingHours { get; set; } = true;
+
         public void Start(DataCacheService cache)
         {
             if (IsRunning) return;
@@ -66,7 +69,7 @@ namespace StockDatasCollection.Services
             _archiving = true;
             try
             {
-                if (!IsInTradingHours())
+                if (EnforceTradingHours && !IsInTradingHours())
                 {
                     OnArchiveCompleted("[" + DateTime.Now.ToString("HH:mm:ss") + "] 当前不在开盘时段，跳过本次存档。");
                     return;

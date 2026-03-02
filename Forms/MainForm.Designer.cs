@@ -46,6 +46,7 @@ namespace StockDatasCollection.Forms
             this.lblLastCollect = new System.Windows.Forms.Label();
             this.lblNextCollect = new System.Windows.Forms.Label();
             this.lblCacheCount = new System.Windows.Forms.Label();
+            this.chkTimeRestrict = new System.Windows.Forms.CheckBox();
             this.tabArchive = new System.Windows.Forms.TabPage();
             this.rtbArchiveLog = new System.Windows.Forms.RichTextBox();
             this.panelArchiveSettings = new System.Windows.Forms.Panel();
@@ -330,6 +331,7 @@ namespace StockDatasCollection.Forms
             this.panelCollectSettings.Controls.Add(this.lblLastCollect);
             this.panelCollectSettings.Controls.Add(this.lblNextCollect);
             this.panelCollectSettings.Controls.Add(this.lblCacheCount);
+            this.panelCollectSettings.Controls.Add(this.chkTimeRestrict);
             this.panelCollectSettings.Dock = System.Windows.Forms.DockStyle.Top;
             this.panelCollectSettings.Location = new System.Drawing.Point(5, 5);
             this.panelCollectSettings.Name = "panelCollectSettings";
@@ -430,6 +432,18 @@ namespace StockDatasCollection.Forms
             this.lblCacheCount.Size = new System.Drawing.Size(75, 17);
             this.lblCacheCount.TabIndex = 8;
             this.lblCacheCount.Text = "缓存记录：0";
+            // 
+            // chkTimeRestrict
+            // 
+            this.chkTimeRestrict.AutoSize = true;
+            this.chkTimeRestrict.Checked = true;
+            this.chkTimeRestrict.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.chkTimeRestrict.Location = new System.Drawing.Point(220, 11);
+            this.chkTimeRestrict.Name = "chkTimeRestrict";
+            this.chkTimeRestrict.Size = new System.Drawing.Size(170, 21);
+            this.chkTimeRestrict.TabIndex = 9;
+            this.chkTimeRestrict.Text = "仅开盘时段采集（关闭可测试）";
+            this.chkTimeRestrict.UseVisualStyleBackColor = true;
             // 
             // tabArchive
             // 
@@ -908,6 +922,7 @@ namespace StockDatasCollection.Forms
         private System.Windows.Forms.Label lblLastCollect;
         private System.Windows.Forms.Label lblNextCollect;
         private System.Windows.Forms.Label lblCacheCount;
+        private System.Windows.Forms.CheckBox chkTimeRestrict;
         private System.Windows.Forms.DataGridView dgvLiveData;
         private System.Windows.Forms.DataGridViewTextBoxColumn colLiveCode;
         private System.Windows.Forms.DataGridViewTextBoxColumn colLiveName;

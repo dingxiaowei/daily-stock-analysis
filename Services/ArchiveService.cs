@@ -8,8 +8,9 @@ using StockDatasCollection.Models;
 namespace StockDatasCollection.Services
 {
     /// <summary>
-    /// Periodically archives cached stock data to binary files，按分钟级别存档，同一分钟不重复写入。
-    /// Archive path: {ArchiveDirectory}/{StockName}/{TradeDate}/{HHmm}.bin（如 0931.bin 表示 09:31 分钟）
+    /// Periodically archives cached stock data to binary files.
+    /// Archive path: {ArchiveDirectory}/{StockName}/{TradeDate}/{HH-mm-ss-fff}.bin
+    /// 每次触发存档，将“本次间隔内缓存的数据”打包为一个二进制文件。
     /// Binary format: magic "STDA" + version + stock code + record count + records.
     /// </summary>
     public class ArchiveService : IDisposable
@@ -83,15 +84,10 @@ namespace StockDatasCollection.Services
             }
         }
 
-        /// <summary>从交易时间字符串得到分钟键 HHmm，用于按分钟存档、避免同一分钟重复写入。</summary>
-        private static string GetMinuteKeyFromTradeTime(string tradeTime)
-        {
-            if (string.IsNullOrWhiteSpace(tradeTime)) return "0000";
-            string s = tradeTime.Trim().Replace(":", "");
-            return s.Length >= 4 ? s.Substring(0, 4) : s.PadLeft(4, '0');
-        }
-
-        /// <summary>按分钟级别存档：同一股票、同一交易日、同一分钟只写一个文件（HHmm.bin），不重复写入。</summary>
+        /// <summary>
+        /// 按“存档间隔窗口”打包存档：同一股票、同一交易日，本次缓存数据写入一个文件。
+        /// 分钟级去重由 DataCacheService 在入缓存时完成，存档阶段不再按分钟拆文件。
+        /// </summary>
         public void ArchiveNow(DataCacheService cache)
         {
             var snapshot = cache.GetSnapshot();
@@ -110,32 +106,34 @@ namespace StockDatasCollection.Services
                 List<StockDataPoint> points = kv.Value;
                 if (points.Count == 0) continue;
 
-                // 按 (名称, 交易日期, 分钟) 分组，内存中已按分钟去重，每组最多一条
+                // 按 (名称, 交易日期) 分组：本次存档窗口内的数据打包到同一个文件
                 var groups = points
                     .GroupBy(p => new
                     {
                         Name = SanitizeName(p.StockName),
-                        Date = string.IsNullOrWhiteSpace(p.TradeDate) ? DateTime.Now.ToString("yyyy-MM-dd") : p.TradeDate,
-                        Minute = GetMinuteKeyFromTradeTime(p.TradeTime)
+                        Date = string.IsNullOrWhiteSpace(p.TradeDate) ? DateTime.Now.ToString("yyyy-MM-dd") : p.TradeDate
                     });
 
                 foreach (var group in groups)
                 {
                     string stockName = string.IsNullOrWhiteSpace(group.Key.Name) ? stockCode : group.Key.Name;
                     string tradeDate = group.Key.Date;
-                    string minuteFile = group.Key.Minute + ".bin"; // 如 0931.bin
+                    string fileName = DateTime.Now.ToString("HH-mm-ss-fff") + ".bin";
 
                     string dir = Path.Combine(ArchiveDirectory, stockName, tradeDate);
                     try
                     {
                         Directory.CreateDirectory(dir);
-                        string filePath = Path.Combine(dir, minuteFile);
-                        WriteArchiveFile(filePath, stockCode, group.ToList());
+                        string filePath = Path.Combine(dir, fileName);
+                        WriteArchiveFile(filePath, stockCode, group
+                            .OrderBy(p => p.TradeDate)
+                            .ThenBy(p => p.TradeTime)
+                            .ToList());
                         totalWritten += group.Count();
                     }
                     catch (Exception ex)
                     {
-                        errors.Add($"{stockName}/{tradeDate}/{minuteFile}: {ex.Message}");
+                        errors.Add($"{stockName}/{tradeDate}/{fileName}: {ex.Message}");
                     }
                 }
             }
@@ -143,7 +141,7 @@ namespace StockDatasCollection.Services
             cache.Clear();
             LastArchiveTime = DateTime.Now;
 
-            string msg = $"[{DateTime.Now:HH:mm:ss}] 按分钟存档完成，共写入 {totalWritten} 条记录（分钟级不重复）。";
+            string msg = $"[{DateTime.Now:HH:mm:ss}] 存档完成（按间隔打包），共写入 {totalWritten} 条记录。";
             if (errors.Count > 0) msg += " 错误: " + string.Join("; ", errors);
             OnArchiveCompleted(msg);
         }

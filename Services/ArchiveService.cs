@@ -52,15 +52,15 @@ namespace StockDatasCollection.Services
         }
 
         /// <summary>
-        /// 与主窗体一致的采集/存档有效时段（9:13-11:32、12:58-15:02），仅在此时段内执行存档。
+        /// 与主窗体一致的采集/存档有效时段：上午 9:30-11:30、下午 13:00-15:00。
         /// </summary>
         private static bool IsInTradingHours()
         {
             var t = DateTime.Now.TimeOfDay;
-            var morningStart = new TimeSpan(9, 13, 0);
-            var morningEnd = new TimeSpan(11, 32, 0);
-            var afternoonStart = new TimeSpan(12, 58, 0);
-            var afternoonEnd = new TimeSpan(15, 2, 0);
+            var morningStart = new TimeSpan(9, 30, 0);
+            var morningEnd = new TimeSpan(11, 30, 0);
+            var afternoonStart = new TimeSpan(13, 0, 0);
+            var afternoonEnd = new TimeSpan(15, 0, 0);
             return (t >= morningStart && t <= morningEnd) || (t >= afternoonStart && t <= afternoonEnd);
         }
 

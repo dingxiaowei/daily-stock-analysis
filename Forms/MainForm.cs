@@ -144,16 +144,15 @@ namespace StockDatasCollection.Forms
         // Tab 2 — 数据采集
         // ============================================================
         /// <summary>
-        /// 判断当前时间是否在采集有效时段（含 2 分钟缓冲）：上午 9:13-11:32、下午 12:58-15:02。
-        /// 仅在此时段内才实际发起采集。
+        /// 判断当前时间是否在 A 股开盘时段：上午 9:30-11:30、下午 13:00-15:00。
         /// </summary>
         private static bool IsInTradingHours()
         {
             var t = DateTime.Now.TimeOfDay;
-            var morningStart = new TimeSpan(9, 13, 0);
-            var morningEnd = new TimeSpan(11, 32, 0);
-            var afternoonStart = new TimeSpan(12, 58, 0);
-            var afternoonEnd = new TimeSpan(15, 2, 0);
+            var morningStart = new TimeSpan(9, 30, 0);
+            var morningEnd = new TimeSpan(11, 30, 0);
+            var afternoonStart = new TimeSpan(13, 0, 0);
+            var afternoonEnd = new TimeSpan(15, 0, 0);
             return (t >= morningStart && t <= morningEnd) || (t >= afternoonStart && t <= afternoonEnd);
         }
 
@@ -259,7 +258,7 @@ namespace StockDatasCollection.Forms
         {
             if (chkTimeRestrict.Checked && !IsInTradingHours())
             {
-                MessageBox.Show("当前不在开盘时段，存档仅在有效时段内生效。\n有效时段：9:13-11:32、12:58-15:02。\n（取消勾选「仅开盘时段采集」可随时存档测试）",
+                MessageBox.Show("当前不在开盘时段，存档仅在有效时段内生效。\n有效时段：9:30-11:30、13:00-15:00。\n（取消勾选「仅开盘时段采集」可随时存档测试）",
                     "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -447,7 +446,21 @@ namespace StockDatasCollection.Forms
                 .FirstOrDefault();
             if (byStock == null) return;
 
-            var points = byStock.OrderBy(p => p.TradeDate).ThenBy(p => p.TradeTime).ToList();
+            var morningStart = new TimeSpan(9, 30, 0);
+            var afternoonEnd = new TimeSpan(15, 0, 0);
+            var points = byStock
+                .Where(p => {
+                    TimeSpan ts;
+                    if (!TimeSpan.TryParse(p.TradeTime, out ts)) return false;
+                    return ts >= morningStart && ts <= afternoonEnd;
+                })
+                .OrderBy(p => p.TradeDate).ThenBy(p => p.TradeTime).ToList();
+            if (points.Count == 0)
+            {
+                lblChartHint.Text = "加载的数据中没有 9:30-15:00 时段内的分时数据。";
+                webBrowserChart.DocumentText = BuildEmptyChartHtml();
+                return;
+            }
             string title = $"{points[0].StockCode} {points[0].StockName} 分时";
             lblChartHint.Text = $"共 {points.Count} 个分时点 · {title}";
 
@@ -473,6 +486,7 @@ namespace StockDatasCollection.Forms
             var prices = new List<decimal>();
             var volumes = new List<long>();
 
+            long prevCumulativeVol = 0;
             foreach (var p in points)
             {
                 string t = string.IsNullOrEmpty(p.TradeTime) ? p.TradeDate : (p.TradeDate + " " + p.TradeTime);
@@ -480,7 +494,11 @@ namespace StockDatasCollection.Forms
                 decimal price;
                 decimal.TryParse(p.CurrentPrice, out price);
                 prices.Add(price);
-                volumes.Add(p.Volume);
+                // Volume 是当日累计成交量，需转换为每分钟增量
+                long deltaVol = p.Volume - prevCumulativeVol;
+                if (deltaVol < 0) deltaVol = p.Volume; // 跨日或首条数据
+                volumes.Add(deltaVol);
+                prevCumulativeVol = p.Volume;
             }
 
             var sb = new StringBuilder();
@@ -525,7 +543,7 @@ var option = {
   dataZoom: [ { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 }, { type: 'slider', xAxisIndex: [0, 1], start: 0, end: 100, bottom: 8, height: 20 } ],
   series: [
     { name: '价格', type: 'line', data: prices, xAxisIndex: 0, yAxisIndex: 0, smooth: false, symbol: 'none', lineStyle: { color: '#00d4aa', width: 2 }, markLine: { silent: true, data: [{ yAxis: preClose, lineStyle: { color: '#666', type: 'dashed' }, label: { formatter: '昨收 ' + preClose, color: '#888' } }] } },
-    { name: '成交量', type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1, itemStyle: { color: function(params) { return prices[params.dataIndex] >= preClose ? '#e74c3c' : '#00d4aa'; } } }
+    { name: '成交量', type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1, itemStyle: { color: function(params) { var i = params.dataIndex; var prev = i > 0 ? prices[i-1] : preClose; return prices[i] >= prev ? '#e74c3c' : '#00d4aa'; } } }
   ]
 };
 chart.setOption(option);

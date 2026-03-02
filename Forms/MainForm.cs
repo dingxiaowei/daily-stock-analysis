@@ -486,6 +486,7 @@ namespace StockDatasCollection.Forms
             var prices = new List<decimal>();
             var volumes = new List<long>();
 
+            var avgPrices = new List<decimal>();
             long prevCumulativeVol = 0;
             foreach (var p in points)
             {
@@ -494,12 +495,27 @@ namespace StockDatasCollection.Forms
                 decimal price;
                 decimal.TryParse(p.CurrentPrice, out price);
                 prices.Add(price);
-                // Volume 是当日累计成交量，需转换为每分钟增量
                 long deltaVol = p.Volume - prevCumulativeVol;
-                if (deltaVol < 0) deltaVol = p.Volume; // 跨日或首条数据
+                if (deltaVol < 0) deltaVol = p.Volume;
                 volumes.Add(deltaVol);
                 prevCumulativeVol = p.Volume;
+                // 分时均价 = 累计成交额 / 累计成交量（VWAP）
+                decimal turnover;
+                decimal.TryParse(p.Turnover, out turnover);
+                if (p.Volume > 0 && turnover > 0)
+                    avgPrices.Add(Math.Round(turnover / p.Volume, 2));
+                else
+                    avgPrices.Add(price);
             }
+
+            // 计算 MACD: DIF = EMA12 - EMA26, DEA = EMA(DIF,9), Histogram = (DIF-DEA)*2
+            var difList = new List<decimal>();
+            var deaList = new List<decimal>();
+            var macdList = new List<decimal>();
+            CalcMACD(prices, 12, 26, 9, difList, deaList, macdList);
+
+            // 检测顶背离 / 底背离
+            var divPoints = DetectDivergences(prices, macdList, times);
 
             var sb = new StringBuilder();
             sb.Append("var times = ");
@@ -508,8 +524,18 @@ namespace StockDatasCollection.Forms
             sb.Append(ToJsonArray(prices));
             sb.Append("; var volumes = ");
             sb.Append(ToJsonArray(volumes));
+            sb.Append("; var avgPrices = ");
+            sb.Append(ToJsonArray(avgPrices));
             sb.Append("; var preClose = ");
             sb.Append(preClose.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
+            sb.Append("; var dif = ");
+            sb.Append(ToJsonArray(difList));
+            sb.Append("; var dea = ");
+            sb.Append(ToJsonArray(deaList));
+            sb.Append("; var macd = ");
+            sb.Append(ToJsonArray(macdList));
+            sb.Append("; var divPoints = ");
+            sb.Append(divPoints);
             sb.Append(";");
             string dataJson = sb.ToString();
 
@@ -527,23 +553,38 @@ namespace StockDatasCollection.Forms
 " + dataJson + @"
 var dom = document.getElementById('main');
 var chart = echarts.init(dom);
+var macdColors = macd.map(function(v){ return v >= 0 ? '#e74c3c' : '#00d4aa'; });
 var option = {
   title: { text: '" + HttpUtility.JavaScriptStringEncode(title) + @"', left: 'center', textStyle: { color: '#e0e0e0', fontSize: 14 } },
-  tooltip: { trigger: 'axis' },
-  legend: { data: ['价格', '成交量'], top: 28, textStyle: { color: '#aaa' } },
-  grid: [ { left: '10%', right: '8%', top: '18%', height: '45%' }, { left: '10%', right: '8%', top: '70%', height: '22%' } ],
+  tooltip: { trigger: 'axis', axisPointer: { link: {xAxisIndex: 'all'}, type: 'cross' } },
+  axisPointer: { link: {xAxisIndex: 'all'}, lineStyle: { color: '#888', width: 1, type: 'dashed' } },
+  legend: { data: ['价格', '均价', '成交量', 'DIF', 'DEA', 'MACD'], top: 28, textStyle: { color: '#aaa' } },
+  grid: [
+    { left: '10%', right: '8%', top: '14%', height: '32%' },
+    { left: '10%', right: '8%', top: '50%', height: '15%' },
+    { left: '10%', right: '8%', top: '70%', height: '18%' }
+  ],
   xAxis: [
-    { type: 'category', data: times, gridIndex: 0, axisLabel: { color: '#888' }, axisLine: { lineStyle: { color: '#444' } } },
-    { type: 'category', data: times, gridIndex: 1, axisLabel: { color: '#888' }, axisLine: { lineStyle: { color: '#444' } } }
+    { type: 'category', data: times, gridIndex: 0, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#444' } }, axisPointer: { show: true, lineStyle: { color: '#888', width: 1, type: 'dashed' } } },
+    { type: 'category', data: times, gridIndex: 1, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#444' } }, axisPointer: { show: true, lineStyle: { color: '#888', width: 1, type: 'dashed' } } },
+    { type: 'category', data: times, gridIndex: 2, axisLabel: { color: '#888', fontSize: 10 }, axisLine: { lineStyle: { color: '#444' } }, axisPointer: { show: true, lineStyle: { color: '#888', width: 1, type: 'dashed' } } }
   ],
   yAxis: [
     { type: 'value', gridIndex: 0, scale: true, splitLine: { lineStyle: { color: '#333' } }, axisLabel: { color: '#888' } },
-    { type: 'value', gridIndex: 1, splitLine: { show: false }, axisLabel: { color: '#888' } }
+    { type: 'value', gridIndex: 1, splitLine: { show: false }, axisLabel: { color: '#888' } },
+    { type: 'value', gridIndex: 2, scale: true, splitLine: { lineStyle: { color: '#222' } }, axisLabel: { color: '#888' } }
   ],
-  dataZoom: [ { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 }, { type: 'slider', xAxisIndex: [0, 1], start: 0, end: 100, bottom: 8, height: 20 } ],
+  dataZoom: [
+    { type: 'inside', xAxisIndex: [0, 1, 2], start: 0, end: 100 },
+    { type: 'slider', xAxisIndex: [0, 1, 2], start: 0, end: 100, bottom: 8, height: 20 }
+  ],
   series: [
-    { name: '价格', type: 'line', data: prices, xAxisIndex: 0, yAxisIndex: 0, smooth: false, symbol: 'none', lineStyle: { color: '#00d4aa', width: 2 }, markLine: { silent: true, data: [{ yAxis: preClose, lineStyle: { color: '#666', type: 'dashed' }, label: { formatter: '昨收 ' + preClose, color: '#888' } }] } },
-    { name: '成交量', type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1, itemStyle: { color: function(params) { var i = params.dataIndex; var prev = i > 0 ? prices[i-1] : preClose; return prices[i] >= prev ? '#e74c3c' : '#00d4aa'; } } }
+    { name: '价格', type: 'line', data: prices, xAxisIndex: 0, yAxisIndex: 0, smooth: false, symbol: 'none', lineStyle: { color: '#00d4aa', width: 2 }, markLine: { silent: true, data: [{ yAxis: preClose, lineStyle: { color: '#666', type: 'dashed' }, label: { formatter: '昨收 ' + preClose, color: '#888' } }] }, markPoint: { data: divPoints } },
+    { name: '均价', type: 'line', data: avgPrices, xAxisIndex: 0, yAxisIndex: 0, smooth: true, symbol: 'none', lineStyle: { color: '#f5c842', width: 1.5, type: 'solid' } },
+    { name: '成交量', type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1, itemStyle: { color: function(params) { var i = params.dataIndex; var prev = i > 0 ? prices[i-1] : preClose; return prices[i] >= prev ? '#e74c3c' : '#00d4aa'; } } },
+    { name: 'DIF', type: 'line', data: dif, xAxisIndex: 2, yAxisIndex: 2, smooth: false, symbol: 'none', lineStyle: { color: '#f5a623', width: 1.5 } },
+    { name: 'DEA', type: 'line', data: dea, xAxisIndex: 2, yAxisIndex: 2, smooth: false, symbol: 'none', lineStyle: { color: '#4a90d9', width: 1.5 } },
+    { name: 'MACD', type: 'bar', data: macd, xAxisIndex: 2, yAxisIndex: 2, itemStyle: { color: function(params) { return macdColors[params.dataIndex]; } } }
   ]
 };
 chart.setOption(option);
@@ -552,6 +593,153 @@ window.onresize = function() { chart.resize(); };
 </body>
 </html>";
             return html;
+        }
+
+        /// <summary>计算 MACD 指标：DIF = EMA(fast) - EMA(slow), DEA = EMA(DIF, signal), MACD = (DIF-DEA)*2</summary>
+        private static void CalcMACD(List<decimal> prices, int fast, int slow, int signal,
+            List<decimal> dif, List<decimal> dea, List<decimal> macd)
+        {
+            if (prices.Count == 0) return;
+            decimal emaFast = prices[0];
+            decimal emaSlow = prices[0];
+            decimal emaDea = 0;
+            decimal mf = 2m / (fast + 1);
+            decimal ms = 2m / (slow + 1);
+            decimal md = 2m / (signal + 1);
+
+            for (int i = 0; i < prices.Count; i++)
+            {
+                decimal p = prices[i];
+                if (i == 0) { emaFast = p; emaSlow = p; }
+                else { emaFast = p * mf + emaFast * (1 - mf); emaSlow = p * ms + emaSlow * (1 - ms); }
+                decimal d = emaFast - emaSlow;
+                if (i == 0) emaDea = d;
+                else emaDea = d * md + emaDea * (1 - md);
+                dif.Add(Math.Round(d, 4));
+                dea.Add(Math.Round(emaDea, 4));
+                macd.Add(Math.Round((d - emaDea) * 2, 4));
+            }
+        }
+
+        /// <summary>
+        /// 基于 MACD 柱局部峰/谷检测背离（不要求红绿柱必须翻色后再比较）。
+        /// 顶背离：红柱峰值降低，且该峰对应价格更高。
+        /// 底背离：绿柱谷值抬高（更接近 0），且该谷对应价格更低。
+        /// </summary>
+        private static string DetectDivergences(List<decimal> prices, List<decimal> macdHist, List<string> times)
+        {
+            int n = prices.Count;
+            if (n < 15) return "[]";
+
+            var peakIdx = new List<int>();   // MACD 正柱局部峰
+            var troughIdx = new List<int>(); // MACD 负柱局部谷
+            int window = 2;
+            int minGap = 3;
+
+            for (int i = window; i < n - window; i++)
+            {
+                decimal v = macdHist[i];
+                if (v > 0)
+                {
+                    bool isPeak = true;
+                    for (int j = i - window; j <= i + window; j++)
+                    {
+                        if (j == i) continue;
+                        if (macdHist[j] > v) { isPeak = false; break; }
+                    }
+                    if (isPeak)
+                    {
+                        if (peakIdx.Count == 0 || i - peakIdx[peakIdx.Count - 1] >= minGap)
+                            peakIdx.Add(i);
+                        else if (v > macdHist[peakIdx[peakIdx.Count - 1]])
+                            peakIdx[peakIdx.Count - 1] = i;
+                    }
+                }
+                else if (v < 0)
+                {
+                    bool isTrough = true;
+                    for (int j = i - window; j <= i + window; j++)
+                    {
+                        if (j == i) continue;
+                        if (macdHist[j] < v) { isTrough = false; break; }
+                    }
+                    if (isTrough)
+                    {
+                        if (troughIdx.Count == 0 || i - troughIdx[troughIdx.Count - 1] >= minGap)
+                            troughIdx.Add(i);
+                        else if (v < macdHist[troughIdx[troughIdx.Count - 1]])
+                            troughIdx[troughIdx.Count - 1] = i;
+                    }
+                }
+            }
+
+            const decimal macdEps = 0.0001m;
+            const decimal priceEps = 0.001m;
+            var result = new StringBuilder("[");
+            bool first = true;
+
+            int tLevel = 0;
+            for (int k = 1; k < peakIdx.Count; k++)
+            {
+                int prev = peakIdx[k - 1], curr = peakIdx[k];
+                bool peakLower = macdHist[curr] < macdHist[prev] - macdEps;
+                bool priceHigher = prices[curr] > prices[prev] + priceEps;
+                if (peakLower && priceHigher)
+                {
+                    tLevel++;
+                    if (!first) result.Append(",");
+                    first = false;
+                    AppendDivPoint(result, times[curr], prices[curr], tLevel.ToString(), false);
+                }
+                else
+                {
+                    tLevel = 0;
+                }
+            }
+
+            int bLevel = 0;
+            for (int k = 1; k < troughIdx.Count; k++)
+            {
+                int prev = troughIdx[k - 1], curr = troughIdx[k];
+                bool troughHigher = macdHist[curr] > macdHist[prev] + macdEps; // 绿柱绝对值变小
+                bool priceLower = prices[curr] < prices[prev] - priceEps;
+                if (troughHigher && priceLower)
+                {
+                    bLevel++;
+                    if (!first) result.Append(",");
+                    first = false;
+                    AppendDivPoint(result, times[curr], prices[curr], bLevel.ToString(), true);
+                }
+                else
+                {
+                    bLevel = 0;
+                }
+            }
+
+            result.Append("]");
+            return result.ToString();
+        }
+
+        private static void AppendDivPoint(StringBuilder sb, string time, decimal price, string label, bool isBottom)
+        {
+            string color = isBottom ? "#e74c3c" : "#2ecc71";
+            string pos = isBottom ? "bottom" : "top";
+            int rotate = isBottom ? 0 : 180;
+            sb.Append("{coord:[\"");
+            sb.Append(HttpUtility.JavaScriptStringEncode(time));
+            sb.Append("\",");
+            sb.Append(price.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
+            sb.Append("],value:\"");
+            sb.Append(HttpUtility.JavaScriptStringEncode(label));
+            sb.Append("\",symbol:\"triangle\",symbolSize:18,symbolRotate:");
+            sb.Append(rotate);
+            sb.Append(",itemStyle:{color:\"");
+            sb.Append(color);
+            sb.Append("\"},label:{show:true,position:\"");
+            sb.Append(pos);
+            sb.Append("\",color:\"");
+            sb.Append(color);
+            sb.Append("\",fontSize:10,formatter:\"{c}\"}}");
         }
 
         private static string ToJsonArray(IEnumerable<string> list)

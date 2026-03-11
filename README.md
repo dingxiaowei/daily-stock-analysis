@@ -1,5 +1,5 @@
 # 介绍
-下面是个人花了六年上万业余时间从0到1的量化研究历程
+量化软件，主打实时性
 # 效果图
 <img width="1920" height="1048" alt="af31caf5379d6cdf51fb2c08e1ab728f" src="https://github.com/user-attachments/assets/24028864-0c20-4e56-abdd-48b36081c4d2" />
 <img width="1920" height="1033" alt="b14275b6f37f68910fe549c447cabd77" src="https://github.com/user-attachments/assets/451d4f58-4981-44b0-9ae2-a128ccfc90fa" />
